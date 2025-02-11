@@ -28,7 +28,7 @@ git push -u origin main
 
 5. 构建和部署
    - 推送代码后，Github Actions 会自动运行部署流程
-   - 等待部署完成后，可以通过 `https://你的用户名.github.io/TBAI` 访问应用
+   - 等待部署完成后，可以通过 `https://xionglingsong.github.io/TBAI` 访问应用
 
 ## 本地测试
 

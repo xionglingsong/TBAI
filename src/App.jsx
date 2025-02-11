@@ -322,12 +322,12 @@ ${speech}`
       content = `演讲口译练习记录 - ${timestamp}\n\n`;
       if (speech) content += `【生成的演讲稿】\n${speech}\n\n`;
       if (typingText) content += `【口译内容】\n${typingText}\n\n`;
-      if (evaluationResult) content += `【评估结果】\n${evaluationResult}\n`;
+      if (evaluationResult) content += `【评估结果】\n${evaluationResult}\n\n【译后反思】\n1.\n- Original:\n- What I Said:\n- I Should Have Said:\n- Diagnosis / Cure:\n\n- 3 challenges I encountered:\n- 3 things I did well:\n- 3 things to improve:\n`;
     } else if (format === 'md') {
       content = `# 演讲口译练习记录\n\n*记录时间：${timestamp}*\n\n`;
       if (speech) content += `## 生成的演讲稿\n\n${speech}\n\n`;
       if (typingText) content += `## 口译内容\n\n${typingText}\n\n`;
-      if (evaluationResult) content += `## 评估结果\n\n${evaluationResult}\n`;
+      if (evaluationResult) content += `## 评估结果\n\n${evaluationResult}\n\n## 译后反思\n\n1.\n- Original:\n- What I Said:\n- I Should Have Said:\n- Diagnosis / Cure:\n\n- 3 challenges I encountered:\n- 3 things I did well:\n- 3 things to improve:\n`;
     }
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -481,7 +481,7 @@ B. 口语场合版本
           model: config.model,
           messages: [{
             role: 'user',
-            content: `请根据以下要求，生成一篇适合口译练习的3分钟${targetLanguage}演讲稿：\n\n1. 内容要求：\n- 将源文本改写为约450-500字的演讲稿\n- 保持原文核心观点，但使其更适合口头表达\n- 加入恰当的口语化表达和过渡词\n- 确保内容的连贯性和逻辑性\n\n2. 结构要求：\n- 开场引言(约60-70字)：包含吸引听众注意的开场白\n- 主体部分(约300-350字)：2-3个清晰的论述点\n- 结论部分(约80-90字)：总结核心观点并给出呼吁\n\n3. 语言风格：\n- 使用正式但不过于学术的语言\n- 避免过于复杂的句式\n- 适当增加修辞手法\n- 句子长度控制在15-25字之间\n- 加入适量的重复和强调\n\n源文本：${sourceText}`
+            content: `请根据以下要求，生成一篇适合口译练习的3分钟${targetLanguage}演讲稿：\n\n1. 内容要求：\n- 将源文本改写为约450-500字的演讲稿，不要带括号括注语气词、停顿、时间、开头结尾等提示\n- 保持原文核心观点，但使其更适合口头表达\n- 加入恰当的口语化表达和过渡词\n- 确保内容的连贯性和逻辑性\n\n2. 结构要求：\n- 开场引言(约60-70字)：包含吸引听众注意的开场白\n- 主体部分(约300-350字)：2-3个清晰的论述点\n- 结论部分(约80-90字)：总结核心观点并给出呼吁\n\n3. 语言风格：\n- 使用正式但不过于学术的语言\n- 避免过于复杂的句式\n- 适当增加修辞手法\n- 句子长度控制在15-25字之间\n- 加入适量的重复和强调\n\n源文本：${sourceText}`
           }],
           stream: false,
           max_tokens: 1024,
@@ -579,7 +579,7 @@ B. 口语场合版本
           </Box>
           {audioUrl && (
             <Box sx={{ mt: 2 }}>
-              <Typography variant="subtitle1" sx={{ mb: 1 }}>AI 生成的语音：</Typography>
+              <Typography variant="subtitle1" sx={{ mb: 1 }}>AI 生成语音：</Typography>
               <audio controls src={audioUrl} style={{ width: '100%' }} />
             </Box>
           )}
@@ -650,7 +650,7 @@ B. 口语场合版本
                   onChange={(e) => {
                     setTypingText(e.target.value);
                   }}
-                  placeholder="在此输入您的口译内容..."
+                  placeholder="建议用语音转文字软件输入您的口译内容（暂未支持将口译录音回放转文字）..."
                   sx={{ mb: 2 }}
                 />
                 <Button
@@ -682,7 +682,7 @@ B. 口语场合版本
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell>中文术语/词组</TableCell>
+                      <TableCell>中文词块</TableCell>
                       <TableCell>English Terms</TableCell>
                       <TableCell>解释说明</TableCell>
                       <TableCell>分类</TableCell>
