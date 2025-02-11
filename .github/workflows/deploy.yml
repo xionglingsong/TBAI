@@ -33,7 +33,9 @@ jobs:
       - name: Cache dependencies
         uses: actions/cache@v3
         with:
-          path: ~/.npm
+          path: |
+            ~/.npm
+            node_modules
           key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
@@ -43,14 +45,20 @@ jobs:
       
       - name: Build
         run: |
+          echo "开始构建..."
           npm run build
-          ls -la dist  # 检查 dist/ 是否生成
+          echo "构建完成，检查dist目录："
+          ls -la
+          echo "dist目录内容："
+          ls -la dist || echo "dist目录不存在！"
+          echo "确认dist目录是否存在："
+          test -d dist && echo "dist目录存在" || echo "dist目录不存在！"
       
       - name: Setup Pages
         uses: actions/configure-pages@v3
       
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v2
         with:
           path: ./dist
       
