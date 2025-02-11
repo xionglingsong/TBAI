@@ -67,8 +67,11 @@ npm run dev
 
 ### 1. 基础配置
 - 点击右上角设置图标
-- 输入 API Key
+- 输入 API Key（SiliconCloud 邀请奖励持续进行，2000 万 Tokens 送不停！https://cloud.siliconflow.cn/i/rO1mUGF7）
 - 选择合适的模型
+模型：deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+语音模型：fish-speech-1.5
+音色：alex
 
 ### 2. 生成演讲稿
 - 在输入框中粘贴或输入源文本
