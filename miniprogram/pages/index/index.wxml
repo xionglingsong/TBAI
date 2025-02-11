@@ -1,0 +1,97 @@
+<view class="container">
+  <view class="header">
+    <text class="title">演讲稿生成器</text>
+    <view class="settings-icon" bindtap="showSettings">⚙️</view>
+    <view class="debug-toggle" bindtap="toggleDebugMode">🔧</view>
+  </view>
+  
+  <view class="input-section">
+    <text class="label">请输入源文本：</text>
+    <textarea class="input-area" placeholder="在此输入需要转换的文本内容..." bindinput="onInputChange" value="{{sourceText}}"></textarea>
+  </view>
+
+  <view class="button-section">
+    <button class="generate-btn" bindtap="generateSpeech" data-language="中文">生成中文演讲稿</button>
+    <button class="generate-btn" bindtap="generateSpeech" data-language="英文">生成英文演讲稿</button>
+  </view>
+
+  <view class="output-section" wx:if="{{speech}}">
+    <text class="label">生成的演讲稿：</text>
+    <view class="speech-content">
+      <text>{{speech}}</text>
+    </view>
+
+    <view class="button-section">
+      <button class="generate-btn" bindtap="transcribeAudio" disabled="{{isTranscribing}}">
+        {{isTranscribing ? '转换中...' : '语音转文本'}}
+      </button>
+    </view>
+
+    <view class="output-section" wx:if="{{transcribedText}}">
+      <text class="label">识别结果：</text>
+      <view class="speech-content">
+        <text>{{transcribedText}}</text>
+      </view>
+    </view>
+
+    <view class="evaluation-section" wx:if="{{evaluationResult}}">
+      <text class="label">评估结果：</text>
+      <view class="evaluation-content">
+        <text>{{evaluationResult}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="debug-panel" wx:if="{{debugMode}}">
+    <view class="debug-header">
+      <text>调试信息</text>
+    </view>
+    <view class="debug-content">
+      <view class="debug-item">
+        <text class="debug-label">状态：</text>
+        <text class="debug-value">{{debugInfo.status || '空闲'}}</text>
+      </view>
+      <view class="debug-item">
+        <text class="debug-label">API Key：</text>
+        <text class="debug-value">{{debugInfo.config.apiKey}}</text>
+      </view>
+      <view class="debug-item">
+        <text class="debug-label">模型：</text>
+        <text class="debug-value">{{debugInfo.config.model}}</text>
+      </view>
+      <view class="debug-item">
+        <text class="debug-label">文本长度：</text>
+        <text class="debug-value">{{debugInfo.config.textLength || 0}}</text>
+      </view>
+      <view class="debug-item">
+        <text class="debug-label">更新时间：</text>
+        <text class="debug-value">{{debugInfo.timestamp || '-'}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="setting-dialog" wx:if="{{showSettingDialog}}">
+    <view class="dialog-mask"></view>
+    <view class="dialog-content">
+      <view class="dialog-header">
+        <text>设置</text>
+      </view>
+      <form bindsubmit="onSettingSave">
+        <view class="dialog-body">
+          <view class="form-item">
+            <text class="label">API Key：</text>
+            <input name="apiKey" value="{{apiKey}}" placeholder="请输入API Key" />
+          </view>
+          <view class="form-item">
+            <text class="label">模型：</text>
+            <input name="model" value="{{model}}" placeholder="请输入模型名称" />
+          </view>
+        </view>
+        <view class="dialog-footer">
+          <button class="cancel-btn" bindtap="onSettingCancel">取消</button>
+          <button class="save-btn" form-type="submit">保存</button>
+        </view>
+      </form>
+    </view>
+  </view>
+</view>
