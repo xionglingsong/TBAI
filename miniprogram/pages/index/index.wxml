@@ -23,7 +23,7 @@
 
     <view class="button-section">
       <button class="generate-btn" bindtap="transcribeAudio" disabled="{{isTranscribing}}">
-        {{isTranscribing ? '转换中...' : '语音转文本'}}
+        {{isTranscribing ? '转写中...' : '转写录音'}}
       </button>
     </view>
 

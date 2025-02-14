@@ -10,7 +10,10 @@ Page({
     debugMode: false,
     debugInfo: {},
     isTranscribing: false,
-    transcribedText: ''
+    transcribedText: '',
+    isRecording: false,
+    recordedAudio: null,
+    audioLevel: 0
   },
 
   onLoad() {
@@ -143,17 +146,151 @@ Page({
     });
   },
 
-  transcribeAudio() {
+  startRecording() {
+    const recorderManager = wx.getRecorderManager();
+    
+    recorderManager.onStart(() => {
+      this.setData({ isRecording: true });
+      this.updateDebugInfo({ status: '开始录音' });
+    });
+
+    recorderManager.onError((error) => {
+      console.error('录音失败:', error);
+      let errorMessage = '录音失败';
+      
+      // 根据错误类型提供具体的错误信息
+      switch(error.errMsg) {
+        case 'operateRecorder:fail auth deny':
+          errorMessage = '无法访问麦克风，请在设置中允许使用麦克风';
+          break;
+        case 'operateRecorder:fail system permission denied':
+          errorMessage = '系统拒绝访问麦克风，请检查系统设置';
+          break;
+        case 'operateRecorder:fail:busy':
+          errorMessage = '麦克风正在被其他应用使用，请先关闭';
+          break;
+        case 'operateRecorder:fail:latency':
+          errorMessage = '录音设备响应超时，请重试';
+          break;
+        default:
+          errorMessage = `录音失败: ${error.errMsg}`;
+      }
+      
+      wx.showToast({
+        title: errorMessage,
+        icon: 'none',
+        duration: 3000
+      });
+      this.setData({ isRecording: false });
+    });
+
+    const options = {
+      duration: 600000,
+      sampleRate: 44100,
+      numberOfChannels: 1,
+      encodeBitRate: 192000,
+      format: 'wav'
+    };
+
+    // 先检查录音权限
+    wx.authorize({
+      scope: 'scope.record',
+      success: () => {
+        recorderManager.start(options);
+      },
+      fail: () => {
+        wx.showModal({
+          title: '需要录音权限',
+          content: '请允许使用麦克风进行录音',
+          confirmText: '去设置',
+          success: (res) => {
+            if (res.confirm) {
+              wx.openSetting();
+            }
+          }
+        });
+      }
+    });
+  },
+
+  stopRecording() {
+    const recorderManager = wx.getRecorderManager();
+    
+    recorderManager.onStop((res) => {
+      this.setData({
+        isRecording: false,
+        recordedAudio: res.tempFilePath
+      });
+      this.updateDebugInfo({ status: '录音已完成' });
+      
+      // 自动开始转写录音内容
+      this.transcribeAudio(res.tempFilePath);
+    });
+
+    recorderManager.stop();
+  },
+
+  transcribeAudio(audioPath) {
+    if (!audioPath) {
+      wx.showToast({
+        title: '请先录制音频',
+        icon: 'none'
+      });
+      return;
+    }
+
+    if (!this.data.apiKey) {
+      wx.showToast({
+        title: '请先设置API Key',
+        icon: 'none'
+      });
+      return;
+    }
+
     this.setData({ isTranscribing: true });
     this.updateDebugInfo({ status: '正在转换语音为文本' });
 
-    // 模拟语音转文本过程
-    setTimeout(() => {
-      this.setData({
-        isTranscribing: false,
-        transcribedText: '这是语音转文本的示例结果。实际应用中，这里应该是调用语音识别API得到的结果。'
-      });
-      this.updateDebugInfo({ status: '语音转文本完成' });
-    }, 2000);
+    wx.uploadFile({
+      url: 'https://api.siliconflow.cn/v1/audio/transcriptions',
+      filePath: audioPath,
+      name: 'file',
+      header: {
+        'Authorization': `Bearer ${this.data.apiKey}`
+      },
+      formData: {
+        'model': 'FunAudioLLM/SenseVoiceSmall'
+      },
+      success: (res) => {
+        try {
+          const result = JSON.parse(res.data);
+          if (result.text) {
+            this.setData({
+              transcribedText: result.text
+            });
+            this.updateDebugInfo({ status: '转写完成' });
+          } else {
+            throw new Error('转写结果为空');
+          }
+        } catch (error) {
+          console.error('解析响应失败:', error);
+          wx.showToast({
+            title: '转写失败，请重试',
+            icon: 'none'
+          });
+          this.updateDebugInfo({ status: '转写失败' });
+        }
+      },
+      fail: (error) => {
+        console.error('转写请求失败:', error);
+        wx.showToast({
+          title: '转写失败，请重试',
+          icon: 'none'
+        });
+        this.updateDebugInfo({ status: '转写失败' });
+      },
+      complete: () => {
+        this.setData({ isTranscribing: false });
+      }
+    });
   }
 });

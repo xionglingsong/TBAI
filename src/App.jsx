@@ -22,6 +22,7 @@ import {
 import SettingsIcon from '@mui/icons-material/Settings';
 import BuildIcon from '@mui/icons-material/Build';
 import DownloadIcon from '@mui/icons-material/Download';
+import RecordRTC, { StereoAudioRecorder } from 'recordrtc';
 
 const defaultConfig = {
   model: 'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B',
@@ -52,16 +53,18 @@ function App() {
   const [recordedAudio, setRecordedAudio] = useState(null);
   const [audioLevel, setAudioLevel] = useState(0);
   const [typingText, setTypingText] = useState('');
+  const animationFrameRef = useRef(null);
   const [typingSpeed, setTypingSpeed] = useState(0);
   const [typingStartTime, setTypingStartTime] = useState(null);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluationResult, setEvaluationResult] = useState(null);
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const animationFrameRef = useRef(null);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [uploadedAudio, setUploadedAudio] = useState(null);
+  const recorderRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const sourceNodeRef = useRef(null);
+  const streamRef = useRef(null);
 
   const updateDebugInfo = (info) => {
     setDebugInfo(prev => ({
@@ -117,7 +120,7 @@ function App() {
           model: config.model,
           messages: [{
             role: 'user',
-            content: `请分析以下演讲稿中可能出现的翻译障碍，包括专业术语、生词、难点词组等。请严格按照以下JSON格式返回：
+            content: `请分析以下演讲稿中可能出现的翻译障碍，包括专业术语、新词与缩略语、跨领域术语、文化特色词汇、机构名称、品牌名、人名地名、特定语境下有特殊含义的词组、文中反复出现的关键术语、难点词组等。请严格按照以下JSON格式返回：
 [
   {
     "term": "中文术语 | English Term",
@@ -183,21 +186,6 @@ ${speech}`
     }
   };
 
-  // 初始化音频上下文
-  useEffect(() => {
-    audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    analyserRef.current = audioContextRef.current.createAnalyser();
-    analyserRef.current.fftSize = 256;
-    return () => {
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
-  }, []);
-
   // 更新音频电平
   const updateAudioLevel = () => {
     if (!analyserRef.current || !isRecording) return;
@@ -205,59 +193,144 @@ ${speech}`
     const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
     analyserRef.current.getByteFrequencyData(dataArray);
 
+    // 计算音频电平
     const average = dataArray.reduce((acc, value) => acc + value, 0) / dataArray.length;
-    setAudioLevel(average / 255); // 归一化到0-1范围
+    const normalizedLevel = Math.min(average / 128, 1);
+    setAudioLevel(normalizedLevel);
 
+    // 继续下一帧更新
     animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
+  };
+
+  // 初始化音频上下文
+  const initAudioContext = async () => {
+    try {
+      // 先请求麦克风权限并获取流
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // 保存获取到的音频流
+      streamRef.current = stream;
+      
+      // 权限获取成功后初始化音频上下文
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      analyserRef.current.fftSize = 256;
+
+      // 创建源节点
+      sourceNodeRef.current = audioContextRef.current.createMediaStreamSource(stream);
+      sourceNodeRef.current.connect(analyserRef.current);
+      return stream;
+    } catch (error) {
+      console.error('音频上下文初始化失败:', error);
+      return null;
+    }
   };
 
   // 开始录音
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream);
-      audioChunksRef.current = [];
+      // 确保音频上下文已初始化并获取流
+      const stream = !audioContextRef.current ? await initAudioContext() : streamRef.current;
+      if (!stream) {
+        throw new Error('无法初始化音频设备');
+      }
 
-      // 设置音频可视化
-      sourceNodeRef.current = audioContextRef.current.createMediaStreamSource(stream);
-      sourceNodeRef.current.connect(analyserRef.current);
+      // 确保RecordRTC已正确导入
+      if (typeof RecordRTC === 'undefined') {
+        throw new Error('录音组件未正确加载');
+      }
+      
+      // 创建 RecordRTC 实例
+      recorderRef.current = new RecordRTC(stream, {
+        type: 'audio',
+        mimeType: 'audio/wav',
+        sampleRate: 48000,
+        numberOfAudioChannels: 2,
+        audioBitsPerSecond: 128000,
+        recorderType: RecordRTC.StereoAudioRecorder
+      });
+
+      // 开始录音和音频可视化
+      recorderRef.current.startRecording();
       updateAudioLevel();
-
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorderRef.current.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        setRecordedAudio(audioUrl);
-      };
-
-      mediaRecorderRef.current.start();
       setIsRecording(true);
       updateDebugInfo({ status: '正在录音' });
     } catch (error) {
-      console.error('录音失败:', error);
-      alert('无法访问麦克风，请确保已授予权限');
+      console.error('录音失败:', {
+        errorType: error.name,
+        errorMessage: error.message,
+        errorStack: error.stack
+      });
+      let errorMessage = '录音失败，请重试';
+      
+      switch (error.name) {
+        case 'NotAllowedError':
+          errorMessage = '无法访问麦克风，请检查：\n1. 是否已在浏览器中允许麦克风访问\n2. 系统设置中是否已授权浏览器使用麦克风';
+          break;
+        case 'NotFoundError':
+          errorMessage = '未检测到麦克风设备，请检查：\n1. 麦克风设备是否正确连接\n2. 系统是否识别到麦克风设备\n3. 在系统声音设置中测试麦克风';
+          break;
+        case 'NotReadableError':
+          errorMessage = '麦克风设备被占用或异常，请检查：\n1. 是否有其他应用正在使用麦克风（如视频会议软件）\n2. 尝试关闭占用麦克风的应用后重试\n3. 检查麦克风驱动是否正常';
+          break;
+        case 'NotSupportedError':
+          errorMessage = '浏览器不支持所需的录音功能，请检查：\n1. 是否使用的是最新版本的现代浏览器\n2. 尝试使用其他主流浏览器（如 Chrome）';
+          break;
+        case 'OverconstrainedError':
+          errorMessage = '录音设置不满足要求，请检查：\n1. 麦克风设备是否支持当前的录音配置\n2. 尝试使用默认的录音设置';
+          break;
+        case 'SecurityError':
+          errorMessage = '录音请求被拒绝，请检查：\n1. 是否在安全的网络环境下使用（HTTPS或localhost）\n2. 浏览器的安全策略设置';
+          break;
+        default:
+          errorMessage = `录音失败（${error.name}），请检查：\n1. 浏览器兼容性\n2. 麦克风权限\n3. 设备状态`;
+          break;
+      }
+      
+      alert(errorMessage);
+      updateDebugInfo({ 
+        status: '录音失败', 
+        error: {
+          type: error.name,
+          message: error.message
+        }
+      });
     }
   };
 
-  // 停止录音
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-      setIsRecording(false);
-      if (sourceNodeRef.current) {
-        sourceNodeRef.current.disconnect();
+  const stopRecording = async () => {
+    if (recorderRef.current && isRecording) {
+      try {
+        // 停止录音
+        recorderRef.current.stopRecording(() => {
+          // 获取录音数据
+          const audioBlob = recorderRef.current.getBlob();
+          const audioUrl = URL.createObjectURL(audioBlob);
+      
+          // 更新UI状态
+          setIsRecording(false);
+          if (sourceNodeRef.current) {
+            sourceNodeRef.current.disconnect();
+          }
+          if (recorderRef.current.stream) {
+            recorderRef.current.stream.getTracks().forEach(track => track.stop());
+          }
+          if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+          }
+          setAudioLevel(0);
+          setRecordedAudio(audioUrl);
+          
+          updateDebugInfo({ status: '录音已完成' });
+          
+          // 直接使用生成的audioBlob进行转写
+          transcribeAudio(audioBlob);
+        });
+      } catch (error) {
+        console.error('录音停止失败:', error);
+        alert('录音处理失败，请重试');
+        updateDebugInfo({ status: '录音处理失败' });
       }
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-      setAudioLevel(0);
-      updateDebugInfo({ status: '录音已完成' });
     }
   };
 
@@ -309,7 +382,53 @@ ${speech}`
     }
   };
 
-  const handleDownload = (format) => {
+  const handleDownload = (format, type = 'text') => {
+    // 导出音频文件
+    if (type === 'source-audio' && audioUrl) {
+      fetch(audioUrl)
+        .then(response => response.blob())
+        .then(blob => {
+          const now = new Date();
+          const dateStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `演讲口译_原文音频_${dateStr}.mp3`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        })
+        .catch(error => {
+          console.error('导出音频失败:', error);
+          alert('导出音频失败，请重试');
+        });
+      return;
+    }
+
+    // 导出译文音频
+    if (type === 'target-audio' && recordedAudio) {
+      fetch(recordedAudio)
+        .then(response => response.blob())
+        .then(blob => {
+          const now = new Date();
+          const dateStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `演讲口译_译文音频_${dateStr}.wav`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        })
+        .catch(error => {
+          console.error('导出音频失败:', error);
+          alert('导出音频失败，请重试');
+        });
+      return;
+    }
+
     if (!speech && !typingText && !evaluationResult) {
       alert('没有可导出的内容');
       return;
@@ -330,15 +449,116 @@ ${speech}`
       if (evaluationResult) content += `## 评估结果\n\n${evaluationResult}\n\n## 译后反思\n\n1.\n- Original:\n- What I Said:\n- I Should Have Said:\n- Diagnosis / Cure:\n\n- 3 challenges I encountered:\n- 3 things I did well:\n- 3 things to improve:\n`;
     }
 
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `口译练习记录_${new Date().toISOString().slice(0,10)}.${format}`;
+    a.download = `演讲口译_评估反思_${dateStr}.${format}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const transcribeAudio = async (audioBlob) => {
+    setIsTranscribing(true);
+    updateDebugInfo({ status: '正在转写录音' });
+    
+    try {
+      const form = new FormData();
+      form.append('file', audioBlob, 'recording.wav');
+      form.append('model', 'FunAudioLLM/SenseVoiceSmall');
+
+      const response = await fetch('https://api.siliconflow.cn/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`
+        },
+        body: form,
+      });
+      
+      if (!response.ok) {
+        throw new Error('转写请求失败');
+      }
+      
+      const result = await response.json();
+      if (result.text) {
+        setTypingText(result.text);
+        updateDebugInfo({ status: '转写完成' });
+      } else {
+        throw new Error('转写结果为空');
+      }
+    } catch (error) {
+      console.error('转写失败:', error);
+      alert('转写失败，请重试');
+      updateDebugInfo({ status: '转写失败' });
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  const handleAudioUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setUploadedAudio(url);
+      updateDebugInfo({ status: '音频文件已上传' });
+      // 自动转写上传的音频
+      transcribeAudio(file);
+    }
+  };
+
+  const calculateScore = (evaluation, section) => {
+    // 匹配 "准确性评估：85分" 这种格式
+    const regex = new RegExp(`${section}[^]*?(\d+)分`, 'i');
+    const match = evaluation.match(regex);
+    return match ? parseInt(match[1]) : null;
+  };
+
+  const savePracticeRecord = () => {
+    if (!speech && !typingText && !evaluationResult) {
+      alert('没有可保存的练习记录');
+      return;
+    }
+
+    // 提取各项分数
+    const accuracyScore = calculateScore(evaluationResult, '准确性评估') || 0;
+    const expressionScore = calculateScore(evaluationResult, '语言表达') || 0;
+    const skillsScore = calculateScore(evaluationResult, '口译技巧') || 0;
+
+    // 计算加权总分
+    const totalScore = 
+      (accuracyScore * 0.40) + 
+      (expressionScore * 0.30) + 
+      (skillsScore * 0.30);
+
+    const practiceRecord = {
+      id: Date.now(),
+      date: new Date().toLocaleString(),
+      speech,
+      typingText,
+      evaluationResult,
+      audioUrl: recordedAudio || uploadedAudio,
+      stats: {
+        accuracy: accuracyScore,
+        expression: expressionScore,
+        skills: skillsScore,
+        totalScore: Math.round(totalScore * 10) / 10 // 保留一位小数
+      }
+    };
+
+    const newHistory = [practiceRecord, ...practiceHistory];
+    setPracticeHistory(newHistory);
+    localStorage.setItem('practiceHistory', JSON.stringify(newHistory));
+    updateDebugInfo({ status: '练习记录已保存' });
   };
 
   const handleEvaluateTranslation = async () => {
@@ -376,8 +596,8 @@ ${speech}
 ${typingText}
 
 评估框架：
-1. 评估维度（请逐项打分1-5分并详细说明）：
-A. 准确性评估（40%权重）
+1. 评估维度（请逐项打分0-100分并详细说明，请务必在每个维度的打分环节写成 “准确性评估：X分（0-100）” 的形式，例如：“准确性评估：85分”。）：
+A. 准确性（40%权重）
 - 信息完整度
 - 重要信息保留
 - 数字/专有名词准确性
@@ -397,6 +617,18 @@ C. 口译技巧（30%权重）
 - 语速控制
 - 停顿处理
 - 语调语气
+
+加权总分：准确性*40% + 语言表达*30% + 口译技巧*30%
+
+【返回示例】
+A. 准确性：85分
+- 信息完整度
+- ...
+B. 语言表达：76分
+- ...
+C. 口译技巧：80分
+- ...
+加权总分：80.8分
 
 2. 问题分类与具体示例：
 请列出所有问题，并按以下类别分类：
@@ -446,6 +678,8 @@ B. 口语场合版本
       updateDebugInfo({ status: '评估失败' });
     } finally {
       setIsEvaluating(false);
+      // 自动保存练习记录
+      savePracticeRecord();
     }
   };
 
@@ -481,7 +715,7 @@ B. 口语场合版本
           model: config.model,
           messages: [{
             role: 'user',
-            content: `请根据以下要求，生成一篇适合口译练习的3分钟${targetLanguage}演讲稿：\n\n1. 内容要求：\n- 将源文本改写为约450-500字的演讲稿，不要带括号括注语气词、停顿、时间、开头结尾等提示\n- 保持原文核心观点，但使其更适合口头表达\n- 加入恰当的口语化表达和过渡词\n- 确保内容的连贯性和逻辑性\n\n2. 结构要求：\n- 开场引言(约60-70字)：包含吸引听众注意的开场白\n- 主体部分(约300-350字)：2-3个清晰的论述点\n- 结论部分(约80-90字)：总结核心观点并给出呼吁\n\n3. 语言风格：\n- 使用正式但不过于学术的语言\n- 避免过于复杂的句式\n- 适当增加修辞手法\n- 句子长度控制在15-25字之间\n- 加入适量的重复和强调\n\n源文本：${sourceText}`
+            content: `请根据以下要求，生成一篇适合口译练习的2分钟${targetLanguage}演讲稿：\n\n1. 内容要求：\n- 将源文本改写为约220-320字（中文）或 200-280词（英文）的演讲稿 \n- 不要带括号括注语气词、停顿、时间、开头结尾等提示（例如，（开场引言62字）（第一论述点）（第二论述点））（第三论述点）等，通通不要出现！\n- 保持原文核心观点，但使其更适合口头表达\n- 加入恰当的口语化表达和过渡词\n- 确保内容的连贯性和逻辑性\n\n2. 结构要求：\n- 开场引言(约60-70字)：包含吸引听众注意的开场白\n- 主体部分(约300-350字)：2-3个清晰的论述点\n- 结论部分(约80-90字)：总结核心观点并给出呼吁\n\n3. 语言风格：\n- 使用正式但不过于学术的语言\n- 避免过于复杂的句式\n- 适当增加修辞手法\n- 句子长度控制在15-25字之间\n- 加入适量的重复和强调\n\n源文本：${sourceText}`
           }],
           stream: false,
           max_tokens: 1024,
@@ -572,7 +806,8 @@ B. 口语场合版本
             <Button
               variant="contained"
               onClick={prepareTranslation}
-              disabled={isPreparingTerms}
+              disabled={isPreparingTerms || !speech.trim()}
+              sx={{ mr: 1 }}
             >
               {isPreparingTerms ? '分析中...' : '译前准备'}
             </Button>
@@ -586,6 +821,27 @@ B. 口语场合版本
           
           <Box sx={{ mt: 3 }}>
             <Typography variant="h6" sx={{ mb: 2 }}>录音练习</Typography>
+            <Box sx={{ mb: 2 }}>
+              <input
+                type="file"
+                accept="audio/*"
+                onChange={handleAudioUpload}
+                style={{ display: 'none' }}
+                id="audio-upload"
+              />
+              <label htmlFor="audio-upload">
+                <Button
+                  variant="outlined"
+                  component="span"
+                  sx={{ mr: 1 }}
+                >
+                  上传录音
+                </Button>
+              </label>
+              {uploadedAudio && (
+                <audio controls src={uploadedAudio} style={{ marginLeft: '10px' }} />
+              )}
+            </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
               {!isRecording ? (
                 <Button
@@ -650,7 +906,7 @@ B. 口语场合版本
                   onChange={(e) => {
                     setTypingText(e.target.value);
                   }}
-                  placeholder="建议用语音转文字软件输入您的口译内容（暂未支持将口译录音回放转文字）..."
+                  placeholder="请输入您的口译内容..."
                   sx={{ mb: 2 }}
                 />
                 <Button
@@ -761,7 +1017,7 @@ B. 口语场合版本
       {(speech || typingText || evaluationResult) && (
         <Paper elevation={3} sx={{ p: 3, mt: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>下载保存</Typography>
-          <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, flexWrap: 'wrap' }}>
             <Button
               variant="outlined"
               onClick={() => handleDownload('txt')}
@@ -775,6 +1031,22 @@ B. 口语场合版本
               startIcon={<DownloadIcon />}
             >
               导出Markdown
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={() => handleDownload('source-audio', 'source-audio')}
+              startIcon={<DownloadIcon />}
+              disabled={!audioUrl}
+            >
+              导出原文音频
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={() => handleDownload('target-audio', 'target-audio')}
+              startIcon={<DownloadIcon />}
+              disabled={!recordedAudio}
+            >
+              导出译文音频
             </Button>
           </Box>
         </Paper>
@@ -790,7 +1062,7 @@ B. 口语场合版本
           right: 0
         }}
       >
-        @熊小译
+        小红书：熊小译 | 公众号：崧说Xshare
       </Typography>
     </Container>
   );
